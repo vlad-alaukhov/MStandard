@@ -7,7 +7,7 @@ import textwrap
 constructor = DBConstructor()
 constructor.chunk_size = 900
 
-root_folder = "/home/home/Projects/Uraltest_beta"
+root_folder = "/home/home/Diploma/MStandard/Data_Base"
 print(f"Модель эмбеддингов: {constructor.embedding_model_name}")
 success = constructor.load_embedding_model(
     model_name="intfloat/E5-large-v2",
@@ -33,7 +33,6 @@ for doc_folder in doc_folders:
 
         os.makedirs(os.path.dirname(chunk_file), exist_ok=True) # Директория для чанков: Текущая/Chunks/Имя_файла_документа |(Без ".docx")
         os.makedirs(os.path.dirname(out_path), exist_ok=True)   # Директория для FAISS:  Текущая/FAISS/Имя_файла_документа  |(Без ".docx")
-
 
         parsed_chunks = constructor.document_parser(doc_file)
 
@@ -69,19 +68,3 @@ for doc_folder in doc_folders:
 
         print(ok, msg)
         print("===================================")
-
-
-
-        '''success, msg = constructor.hybrid_vectorizator(docs=prepared_chunks,
-                                                       db_folder=out_path,
-                                                       text_model="ai-forever/sbert_large_nlu_ru",
-                                                       table_model="deepset/all-mpnet-base-v2-table",  # Для таблиц
-                                                       encode_kwargs={
-                                                           "normalize_embeddings": True,  # Для обеих моделей
-                                                           "batch_size": 16,  # Для экономии RAM
-                                                       },
-                                                       model_kwargs = {
-                                                           "device": "cpu"  # Если нет GPU
-                                                       }
-        )
-        print(success, msg)'''

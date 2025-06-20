@@ -48,7 +48,9 @@ class Config:
     load_dotenv(".venv/.env")
     FAISS_ROOT = os.path.join(os.getcwd(), "DB_FAISS")
     BOT_TOKEN = os.getenv("BOT_TOKEN")
-    DEFAULT_K = 4
+    # DEFAULT_K = 4
+    SEARCH_K = 10  # Увеличиваем с 4 до 10
+    GENERATION_K = 3  # Новый параметр для генерации
 
 # Валидация структуры файла
 class PromptsSchema(BaseModel):
@@ -151,6 +153,15 @@ async def start(message: types.Message):
             ]
         )
 
+        # Загрузка руководства
+        with open("guide.yaml", "r", encoding="utf-8") as f:
+            guide = yaml.safe_load(f)
+
+        await message.answer(
+            guide["brief"],
+            parse_mode=ParseMode.MARKDOWN
+        )
+
         await message.answer("📂 Выберите категорию документов:", reply_markup=keyboard)
 
     except Exception as e:
@@ -188,7 +199,21 @@ async def cmd_get_settings(message: types.Message):
         f"🌡 Температура: <code>{prompts['temperature']}</code>",
         parse_mode=ParseMode.HTML
     )
-
+# ------------------------------- Команда /help -------------------------------
+@dp.message(Command("help"))
+async def help_command(message: types.Message):
+    try:
+        # Загрузка руководства
+        with open("guide.yaml", "r", encoding="utf-8") as f:
+            guide = yaml.safe_load(f)
+        await message.answer(
+            guide["full_guide"],
+            parse_mode=ParseMode.MARKDOWN,
+            disable_web_page_preview=True
+        )
+    except Exception as e:
+        await message.answer("⚠️ Руководство временно недоступно")
+        print(f"Ошибка загрузки руководства: {str(e)}")
 # ================================ Логика бота ================================
 # ----------------------- Обработка категории документов ----------------------
 @dp.callback_query(F.data.startswith("category_"))
@@ -276,7 +301,7 @@ async def handle_query(message: types.Message):
             query=session["query_prefix"] + message.text,
             indexes=session["faiss_indexes"],
             search_function=processor.aformatted_scored_sim_search_by_cos,
-            k=Config.DEFAULT_K
+            k=Config.SEARCH_K
         )
 
         # Сортировка и фильтрация найденных чанков
@@ -284,7 +309,7 @@ async def handle_query(message: types.Message):
             raw_results,
             key=lambda x: x["score"],
             reverse=True
-        )[:3]  # Топ-3 результата
+        )[:Config.GENERATION_K]
 
         # Собираем полные статьи для всех результатов
         session["articles"] = []
