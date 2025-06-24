@@ -361,7 +361,7 @@ async def handle_query(message: types.Message):
         await message.answer(response, reply_markup=builder.as_markup(), parse_mode=ParseMode.MARKDOWN)
 
     except Exception as e:
-        await message.answer("⚠️ Ошибка при обработке запроса")
+        await message.answer(f"⚠️ Ошибка при обработке запроса: {e}")
         print(f"ERROR: {str(e)}")
         traceback.print_exc()
 
