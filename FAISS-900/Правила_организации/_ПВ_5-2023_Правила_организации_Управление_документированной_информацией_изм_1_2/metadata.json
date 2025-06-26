@@ -1,0 +1,8 @@
+{
+  "embedding_model": "intfloat/E5-large-v2",
+  "model_type": "huggingface",
+  "dimension": 1024,
+  "normalized": true,
+  "distance_strategy": "COSINE",
+  "is_e5_model": true
+}
