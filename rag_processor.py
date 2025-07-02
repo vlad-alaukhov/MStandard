@@ -942,12 +942,14 @@ class DBConstructor(RAGProcessor):
                 if not main_meta: raise ValueError("Метаданные базы загружены неверно или их не существует")
                 if not self._check_compatibility(main_meta, current_meta):
                     raise MetaCompatibilityError()
+            if not current_meta: current_meta = main_meta
 
             load_meta = f"_load_metadata: {meta_code}"
             result["is_e5_model"] = current_meta.get("is_e5_model", False)
 
             # 3. Загрузка эмбеддингов
             embs_code, self.embeddings = self._load_embeddings(current_meta)
+
             load_embs = f"_load_embeddings: {embs_code}."
             if self.embeddings is None: raise EmbeddingsNotInitialized("Модель эмбеддингов не загружена")
 

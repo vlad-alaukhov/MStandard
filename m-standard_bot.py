@@ -19,15 +19,14 @@ from pydantic import BaseModel, Field, ValidationError
 import csv
 import os
 from datetime import datetime
-import gitlab
-import certifi
-import ssl
+from github import Github, GithubException
 
 class GCProcessor(RAG):
     def __init__(self, gigachat_model: str = "GigaChat"):
         super().__init__()
         self.api_key = os.environ.get("GIGACHAT_API_KEY", None)
-        self.giga_chat = GigaChat(credentials=self.api_key, scope="GIGACHAT_API_B2B", verify_ssl_certs=False)
+        self.scope = os.getenv("GIGACHAT_SCOPE")
+        self.giga_chat = GigaChat(credentials=self.api_key, scope=self.scope, verify_ssl_certs=False)
         self.user = MessagesRole.USER
         self.system = MessagesRole.SYSTEM
         self.gigachat_model = gigachat_model
@@ -109,10 +108,12 @@ class PromptManager:
         }
 
 class QueryLogger:
-    def __init__(self, log_file="query_logs.csv", gitlab_token=None, gitlab_project_id=None):
+    CSV_DELIMITER = "|"
+    def __init__(self, log_file="query_logs.csv", github_token=None, github_repo=None, branch="bot-logs"):
         self.log_file = log_file
-        self.gitlab_token = gitlab_token
-        self.gitlab_project_id = gitlab_project_id
+        self.github_token = github_token
+        self.github_repo = github_repo  # Формат: "username/repo-name"
+        self.branch = branch
         self._init_log_file()
 
     def _init_log_file(self):
@@ -154,40 +155,24 @@ class QueryLogger:
 
             # Локальное логирование
             with open(self.log_file, "a", encoding="utf-8", newline="") as f:
-                writer = csv.DictWriter(f, fieldnames=self._get_fieldnames())
+                writer = csv.DictWriter(f, fieldnames=self._get_fieldnames(), delimiter=self.CSV_DELIMITER)
                 writer.writerow(record)
 
-            # Отправка в GitLab (если настроено)
-            if self.gitlab_token and self.gitlab_project_id:
-                self._push_to_gitlab(record)
+                # Отправка в GitHub (если настроено)
+                if self.github_token and self.github_repo:
+                    self._push_to_github(record)
 
         except Exception as e:
             print(f"⚠️ Ошибка логирования: {e}")
 
-    def _push_to_gitlab(self, record):
+    def _push_to_github(self, record):
+        """Отправка лога в репозиторий GitHub"""
         try:
-            # 1. Проверка и подготовка токена
-            if not self.gitlab_token:
-                print("⚠️ GitLab token is None. Skipping upload.")
-                return
+            # 1. Инициализация клиента GitHub
+            g = Github(self.github_token)
+            repo = g.get_repo(self.github_repo)
 
-            token = str(self.gitlab_token).strip()
-            if not token.startswith("glpat-"):
-                token = f"glpat-{token}"
-
-            # 3. Инициализация клиента
-            gl = gitlab.Gitlab(
-                url='https://gitlab.appsstudio.ru',
-                private_token=token,
-                api_version='4',
-                ssl_verify=certifi.where() # '/etc/ssl/certs/ca-certificates.crt'
-            )
-
-            # 4. Проверка соединения
-            gl.auth()
-            project = gl.projects.get(self.gitlab_project_id)
-
-            # 5. Формируем CSV строку
+            # 2. Формируем CSV строку
             csv_row = ",".join(f'"{value}"' for value in [
                 record["timestamp"],
                 record["user_id"],
@@ -200,24 +185,38 @@ class QueryLogger:
                 record["user_rating"]
             ]) + "\n"
 
-            # 6. Обновление файла
+            # 3. Получаем текущее содержимое файла (если существует)
             try:
-                repo_file = project.files.get(file_path=self.log_file, ref='logs')
-                current_content = repo_file.decode().decode('utf-8')
-                repo_file.content = current_content + csv_row
-                repo_file.save(branch='logs', commit_message='Bot log update')
-                print("✅ Логи успешно обновлены в GitLab")
-            except gitlab.exceptions.GitlabGetError:
-                project.files.create({
-                    'file_path': self.log_file,
-                    'branch': 'logs',
-                    'content': ",".join(self._get_fieldnames()) + "\n" + csv_row,
-                    'commit_message': 'Initial bot logs'
-                })
-                print("✅ Создан новый файл логов в GitLab")
+                file_contents = repo.get_contents(self.log_file, ref=self.branch)
+                current_content = file_contents.decoded_content.decode("utf-8")
+                new_content = current_content + csv_row
+                update = True
+            except Exception:  # Файл не существует
+                current_content = ""
+                new_content = ",".join(self._get_fieldnames()) + "\n" + csv_row
+                update = False
 
-        except gitlab.exceptions.GitlabError as e:
-            print(f"⚠️ GitLab API error: {str(e)}")
+            # 4. Обновляем или создаем файл
+            commit_message = "Bot log update"
+            if update:
+                repo.update_file(
+                    path=self.log_file,
+                    message=commit_message,
+                    content=new_content,
+                    sha=file_contents.sha,
+                    branch=self.branch
+                )
+            else:
+                repo.create_file(
+                    path=self.log_file,
+                    message="Initial bot logs",
+                    content=new_content,
+                    branch=self.branch
+                )
+            print("✅ Логи успешно обновлены в GitHub")
+
+        except GithubException as e:
+            print(f"⚠️ GitHub API error: {e.data.get('message', str(e))}")
         except Exception as e:
             print(f"⚠️ Unexpected error: {str(e)}")
             traceback.print_exc()
@@ -229,16 +228,19 @@ user_sessions = {}
 prompt_manager = PromptManager()  # Читает prompts.yaml в первый раз
 answer_generator = GCProcessor(prompt_manager.get_prompts()["model_name"])  # Берёт модель из файла
 logger = QueryLogger(
-    gitlab_token=os.getenv("GITLAB_TOKEN"),  # Добавьте в .env
-    gitlab_project_id="132"  # ID вашего проекта GitLab
+    log_file="query_logs_pro-03.csv",
+    github_token=os.getenv("GITHUB_TOKEN"),  # Добавить в .env
+    github_repo="vlad-alaukhov/MStandard",  # Ваш репозиторий
+    branch="bot-logs"  # Существующая ветка
 )
 
 # ====================== Инициализация ======================
 async def on_startup(bot: Bot):
     print("🔄 Запуск инициализации эмбеддингов...")
+    print(Config.FAISS_ROOT)
 
     try:
-        set_embs_result = processor.set_embeddings(Config.FAISS_ROOT, verbose=False)
+        set_embs_result = processor.set_embeddings(Config.FAISS_ROOT, verbose=True)
         processor.db_metadata = set_embs_result["result"]["metadata"]
         pprint(processor.db_metadata)
 
