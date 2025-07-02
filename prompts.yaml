@@ -110,4 +110,4 @@ user_template_ver-01: |
 
 generation_settings:
   temperature: 0.3
-  model_name: "GigaChat-2-Pro"
+  model_name: "GigaChat"

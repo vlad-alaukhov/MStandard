@@ -57,7 +57,7 @@ class Config:
     BOT_TOKEN = os.getenv("BOT_TOKEN")
     # DEFAULT_K = 4
     SEARCH_K = 10  # Увеличиваем с 4 до 10
-    GENERATION_K = 6  # Новый параметр для генерации
+    GENERATION_K = 3  # Новый параметр для генерации
 
 # Валидация структуры файла
 class PromptsSchema(BaseModel):
@@ -228,7 +228,7 @@ user_sessions = {}
 prompt_manager = PromptManager()  # Читает prompts.yaml в первый раз
 answer_generator = GCProcessor(prompt_manager.get_prompts()["model_name"])  # Берёт модель из файла
 logger = QueryLogger(
-    log_file="query_logs_pro-03.csv",
+    log_file="query_logs_lite-03_4-docs.csv",
     github_token=os.getenv("GITHUB_TOKEN"),  # Добавить в .env
     github_repo="vlad-alaukhov/MStandard",  # Ваш репозиторий
     branch="bot-logs"  # Существующая ветка
@@ -240,7 +240,7 @@ async def on_startup(bot: Bot):
     print(Config.FAISS_ROOT)
 
     try:
-        set_embs_result = processor.set_embeddings(Config.FAISS_ROOT, verbose=True)
+        set_embs_result = processor.set_embeddings(Config.FAISS_ROOT, verbose=False)
         processor.db_metadata = set_embs_result["result"]["metadata"]
         pprint(processor.db_metadata)
 
