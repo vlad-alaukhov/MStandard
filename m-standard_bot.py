@@ -55,9 +55,11 @@ class Config:
     load_dotenv(".venv/.env")
     FAISS_ROOT = os.path.join(os.getcwd(), "DB_FAISS")
     BOT_TOKEN = os.getenv("BOT_TOKEN")
-    # DEFAULT_K = 4
+    DEFAULT_K = 4
     SEARCH_K = 10  # Увеличиваем с 4 до 10
-    GENERATION_K = 3  # Новый параметр для генерации
+    GENERATION_K = 4  # Новый параметр для генерации
+    TEXT_K = 3
+    TABLE_K = 5
 
 # Валидация структуры файла
 class PromptsSchema(BaseModel):
@@ -228,11 +230,15 @@ user_sessions = {}
 prompt_manager = PromptManager()  # Читает prompts.yaml в первый раз
 answer_generator = GCProcessor(prompt_manager.get_prompts()["model_name"])  # Берёт модель из файла
 logger = QueryLogger(
-    log_file="query_logs_lite-03_4-docs.csv",
+    log_file="query_logs_lite-2_t-03_ver-03_mmr_tx-3_tb-5.csv",
     github_token=os.getenv("GITHUB_TOKEN"),  # Добавить в .env
     github_repo="vlad-alaukhov/MStandard",  # Ваш репозиторий
     branch="bot-logs"  # Существующая ветка
 )
+filters = [
+    {"element_type": "text", "_search_params": {"k": 3, "lambda_mult": 0.5}},
+    {"element_type": "table", "_search_params": {"k": 3, "lambda_mult": 0.3}}
+]
 
 # ====================== Инициализация ======================
 async def on_startup(bot: Bot):
@@ -417,20 +423,22 @@ async def handle_query(message: types.Message):
         # Получаем контекст пользователя
         session = user_sessions[user_id]
 
+        print(session["query_prefix"] + message.text)
+
         # Выполняем поиск
-        raw_results = await processor.multi_async_search(
+        raw_results = await layered_search(
             query=session["query_prefix"] + message.text,
             indexes=session["faiss_indexes"],
-            search_function=processor.aformatted_scored_sim_search_by_cos,
-            k=Config.SEARCH_K
+            search_function=processor.aformatted_scored_mmr_search_by_vector
+
         )
 
         # Сортировка и фильтрация найденных чанков
         sorted_results = sorted(
             raw_results,
             key=lambda x: x["score"],
-            reverse=True
-        )[:Config.GENERATION_K]
+            reverse=False
+        )# [:Config.GENERATION_K]
 
         # Собираем полные статьи для всех результатов
         session["articles"] = []
@@ -461,11 +469,12 @@ async def handle_query(message: types.Message):
             answer_generator.gigachat_model = prompts["model_name"]  # Просто обновляем имя модели
 
         # Генерируем ответ с помощью GigaChat
-        answer = answer_generator.get_answer(
+        answer = "Ok"
+        '''answer_generator.get_answer(
             user=prompts["user_template"].format(question=message.text, doci=user_prompt),
             system_prompt=prompts["system"],
             temperature=prompts["temperature"]
-        )
+        )'''
 
         # Удаляем индикатор поиска.
         await search_msg.delete()
@@ -529,6 +538,27 @@ async def handle_query(message: types.Message):
         await message.answer(f"⚠️ Ошибка при обработке запроса: {str(e)}")
         print(f"ERROR: {str(e)}")
         traceback.print_exc()
+
+async def layered_search(query: str, indexes: List[Optional[FAISS]], search_function: Callable):
+    all_results = []
+    global filters
+
+    for filter_config in filters:
+        search_args = {
+            "filter": {k: v for k, v in filter_config.items() if not k.startswith('_')},
+            **filter_config.get("_search_params", {})
+        }
+        pprint(search_args)
+
+        chunk_results = await processor.multi_async_search(
+            query=query,
+            indexes=indexes,
+            search_function=search_function,
+            **search_args
+        )
+        all_results.extend(chunk_results)
+
+    return all_results
 
 # Обработчик оценки пользователя
 @dp.callback_query(F.data.startswith("rate_"))
