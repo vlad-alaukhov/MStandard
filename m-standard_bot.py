@@ -230,7 +230,7 @@ user_sessions = {}
 prompt_manager = PromptManager()  # Читает prompts.yaml в первый раз
 answer_generator = GCProcessor(prompt_manager.get_prompts()["model_name"])  # Берёт модель из файла
 logger = QueryLogger(
-    log_file="query_logs_lite-2_t-03_ver-03_mmr_tx-3_tb-5.csv",
+    log_file="query_logs_lite-2_t-03_ver-03_mmr_tx-3_tb-3.csv",
     github_token=os.getenv("GITHUB_TOKEN"),  # Добавить в .env
     github_repo="vlad-alaukhov/MStandard",  # Ваш репозиторий
     branch="bot-logs"  # Существующая ветка
@@ -430,7 +430,6 @@ async def handle_query(message: types.Message):
             query=session["query_prefix"] + message.text,
             indexes=session["faiss_indexes"],
             search_function=processor.aformatted_scored_mmr_search_by_vector
-
         )
 
         # Сортировка и фильтрация найденных чанков
