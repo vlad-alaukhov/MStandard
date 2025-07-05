@@ -1,4 +1,4 @@
-timestamp,user_id,question,category,document_titles,document_contents,document_scores,generated_answer,user_rating
+timestamp|user_id|question|category|document_titles|document_contents|document_scores|generated_answer|user_rating|
 "05.07.2025 18:25:26","1642030274","Что понимается под термином «документированная информация»?","Учебная_база","ПВ-5-2023. ПРАВИЛА ОРГАНИЗАЦИИ. УПРАВЛЕНИЕ ДОКУМЕНТИРОВАННОЙ ИНФОРМАЦИЕЙ
 -----------  
 ПВ-5-2023. ПРАВИЛА ОРГАНИЗАЦИИ. УПРАВЛЕНИЕ ДОКУМЕНТИРОВАННОЙ ИНФОРМАЦИЕЙ
