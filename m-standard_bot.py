@@ -55,11 +55,10 @@ class Config:
     load_dotenv(".venv/.env")
     FAISS_ROOT = os.path.join(os.getcwd(), "DB_FAISS")
     BOT_TOKEN = os.getenv("BOT_TOKEN")
-    DEFAULT_K = 4
-    SEARCH_K = 10  # Увеличиваем с 4 до 10
+
     GENERATION_K = 4  # Новый параметр для генерации
     TEXT_K = 3
-    TABLE_K = 5
+    TABLE_K = 3
 
 # Валидация структуры файла
 class PromptsSchema(BaseModel):
@@ -236,8 +235,8 @@ logger = QueryLogger(
     branch="bot-logs"  # Существующая ветка
 )
 filters = [
-    {"element_type": "text", "_search_params": {"k": 3, "lambda_mult": 0.5}},
-    {"element_type": "table", "_search_params": {"k": 3, "lambda_mult": 0.3}}
+    {"element_type": "text", "_search_params": {"k": Config.TEXT_K, "fetch_k": (Config.TEXT_K * 10)//2, "lambda_mult": 0.6}},
+    {"element_type": "table", "_search_params": {"k": Config.TABLE_K, "fetch_k": (Config.TABLE_K * 10)//2, "lambda_mult": 0.4}}
 ]
 
 # ====================== Инициализация ======================
@@ -429,16 +428,19 @@ async def handle_query(message: types.Message):
         raw_results = await layered_search(
             query=session["query_prefix"] + message.text,
             indexes=session["faiss_indexes"],
-            search_function=processor.aformatted_scored_mmr_search_by_vector
+            search_function=processor.aformatted_scored_mrr_search_with_cosine_sorting
         )
+
+        pprint(raw_results)
 
         # Сортировка и фильтрация найденных чанков
         sorted_results = sorted(
             raw_results,
             key=lambda x: x["score"],
-            reverse=False
-        )# [:Config.GENERATION_K]
+            reverse=True
+        )[:Config.GENERATION_K]
 
+        raw_articles = []
         # Собираем полные статьи для всех результатов
         session["articles"] = []
         for result in sorted_results:
@@ -446,19 +448,40 @@ async def handle_query(message: types.Message):
                 main_chunk=result,
                 faiss_indexes=session["faiss_indexes"]
             )
-            session["articles"].append({
+            raw_articles.append({
+                "doc_id": result["metadata"]["doc_id"],
                 "title": result["metadata"].get("_title", "Без названия"),
                 "content": full_content,
                 "score": result["score"],
                 "element_type": result["metadata"].get("element_type", "text")
             })
 
+        seen = set()
+
+        for article in raw_articles:
+            # Создаем кортеж из идентифицирующих полей
+            identifier = (
+                article["doc_id"],
+                article["title"],
+                article["content"]  # Если контент одинаковый - это дубликат
+            )
+
+            # Если статья уникальна - добавляем
+            if identifier not in seen:
+                seen.add(identifier)
+                session["articles"].append({
+                    "title": article["title"],
+                    "content": article["content"],
+                    "score": article["score"],
+                    "element_type": article["element_type"]
+                })
+
         # Отправляем индикатор поиска
         await search_msg.edit_text("⏳ Готовлю ответ...")
 
         # Формируем промпт для модели
         user_prompt = "\n\n".join(
-            f"Статья {i + 1} ({art['score']:.0%}): {art['title']}\n{art['content'][:2500]}..."
+            f"Статья {i + 1} ({art['score']:.0%}): {art['title']}\n{art['content']}..."
             for i, art in enumerate(session["articles"])
         )
 
@@ -468,12 +491,11 @@ async def handle_query(message: types.Message):
             answer_generator.gigachat_model = prompts["model_name"]  # Просто обновляем имя модели
 
         # Генерируем ответ с помощью GigaChat
-        answer = "Ok"
-        '''answer_generator.get_answer(
+        answer = answer_generator.get_answer(
             user=prompts["user_template"].format(question=message.text, doci=user_prompt),
             system_prompt=prompts["system"],
             temperature=prompts["temperature"]
-        )'''
+        )
 
         # Удаляем индикатор поиска.
         await search_msg.delete()
@@ -541,21 +563,21 @@ async def handle_query(message: types.Message):
 async def layered_search(query: str, indexes: List[Optional[FAISS]], search_function: Callable):
     all_results = []
     global filters
+    Config.TEXT_K = 6
 
     for filter_config in filters:
         search_args = {
             "filter": {k: v for k, v in filter_config.items() if not k.startswith('_')},
             **filter_config.get("_search_params", {})
         }
-        pprint(search_args)
 
-        chunk_results = await processor.multi_async_search(
-            query=query,
-            indexes=indexes,
-            search_function=search_function,
-            **search_args
-        )
-        all_results.extend(chunk_results)
+    chunk_results = await processor.multi_async_search(
+        query=query,
+        indexes=indexes,
+        search_function=search_function,
+        **search_args
+    )
+    all_results.extend(chunk_results)
 
     return all_results
 
