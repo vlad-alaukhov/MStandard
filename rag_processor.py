@@ -21,7 +21,7 @@ from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_community.vectorstores import FAISS
 from langchain_openai import OpenAIEmbeddings
 from langchain_core.embeddings import Embeddings
-
+from transformers import logging
 import functools
 import asyncio
 from sentence_transformers import SentenceTransformer
@@ -276,9 +276,7 @@ class DBConstructor(RAGProcessor):
         elements = []
         for elem in doc.element.body:
             if elem.tag.endswith('p'):
-                p = DocxParagraph(elem, doc)
-                # Пропускаем заголовок документа
-                if p.style.name == 'Heading 1':
+                if elem.style.name == 'Heading 1':
                     continue
                 elements.append(('p', DocxParagraph(elem, doc)))
             elif elem.tag.endswith('tbl'):
@@ -1151,6 +1149,7 @@ class DBConstructor(RAGProcessor):
                 )
 
             elif metadata['model_type'] == "huggingface":
+                logging.set_verbosity_error()
                 return "Успешно", HuggingFaceEmbeddings(
                     model_name=model_name,
                     encode_kwargs={'normalize_embeddings': metadata['normalized']}
@@ -1219,6 +1218,29 @@ class DBConstructor(RAGProcessor):
             })
         return formatted_results
 
+    @staticmethod
+    def formatted_scored_sim_search(index: Optional[FAISS], query: str, **search_args) -> list:
+        """
+        Cинхронный поиск на базе similarity_search_with_relevance_scores.
+        :param index: FAISS-индекс из langchain
+        :param query: Запрос (вектор)
+        :param k:
+        :return: список словарей с результатами поиска
+        """
+        k = search_args.pop("k", 4)
+        kwargs = search_args.copy()
+        # Стандартный поиск по совпадению на основе косинусных расстояний который возвращает
+        results = index.similarity_search_with_score(query, k=k, **kwargs)
+        # Преобразуем результаты в требуемый формат
+        formatted_results = []
+        for doc, distance in results:
+            formatted_results.append({
+                "content": doc.page_content,
+                "score": round(float(1 / (1 + distance)), 6),
+                "metadata": doc.metadata
+            })
+        return formatted_results
+
     # Синхронный поиск по максимальной предельной релевантности с очками
     def formatted_scored_mmr_search_by_vector(self, index: Optional[FAISS], query: str, **search_args: Any) -> list:
         """
@@ -1251,6 +1273,10 @@ class DBConstructor(RAGProcessor):
 
     # --------------------------------------------------
     # Асинхронный поиск
+    @async_wrapper
+    def aformatted_scored_sim_search(self, index: Optional[FAISS], query: str, **search_args) -> list:
+        """Преобразование метода в асинхронный"""
+        return self.formatted_scored_sim_search(index, query, **search_args)
 
     @async_wrapper
     def aformatted_scored_sim_search_by_cos(self, index: Optional[FAISS], query: str, **search_args) -> list:
@@ -1261,7 +1287,7 @@ class DBConstructor(RAGProcessor):
     def aformatted_scored_mmr_search_by_vector(self, index: Optional[FAISS], query: str, **search_args) -> list:
         return self.formatted_scored_mmr_search_by_vector(index, query, **search_args)
 
-    async def aformatted_scored_mrr_search_with_cosine_sorting(self, index: FAISS, query: str, **search_args) -> list:
+    async def aformatted_scored_mmr_search_with_cosine_sorting(self, index: FAISS, query: str, **search_args) -> list:
         # 1. Асинхронно получаем вектор запроса
         query_embedding = await self.embeddings.aembed_query(query)
 

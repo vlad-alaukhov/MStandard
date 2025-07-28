@@ -57,7 +57,7 @@ class Config:
     BOT_TOKEN = os.getenv("BOT_TOKEN")
 
     GENERATION_K = 4  # Новый параметр для генерации
-    TEXT_K = 3
+    TEXT_K = 6
     TABLE_K = 3
 
 # Валидация структуры файла
@@ -229,16 +229,11 @@ user_sessions = {}
 prompt_manager = PromptManager()  # Читает prompts.yaml в первый раз
 answer_generator = GCProcessor(prompt_manager.get_prompts()["model_name"])  # Берёт модель из файла
 logger = QueryLogger(
-    log_file="query_logs_lite-2_t-03_ver-03_mmr_tx-3_tb-3.csv",
+    log_file="Max-2_t-03_ver-03_sim_docs-3_.csv",
     github_token=os.getenv("GITHUB_TOKEN"),  # Добавить в .env
     github_repo="vlad-alaukhov/MStandard",  # Ваш репозиторий
     branch="bot-logs"  # Существующая ветка
 )
-filters = [
-    {"element_type": "text", "_search_params": {"k": Config.TEXT_K, "fetch_k": (Config.TEXT_K * 10)//2, "lambda_mult": 0.6}},
-    {"element_type": "table", "_search_params": {"k": Config.TABLE_K, "fetch_k": (Config.TABLE_K * 10)//2, "lambda_mult": 0.4}}
-]
-
 # ====================== Инициализация ======================
 async def on_startup(bot: Bot):
     print("🔄 Запуск инициализации эмбеддингов...")
@@ -410,6 +405,10 @@ async def handle_category(callback: types.CallbackQuery):
 # --------------------- Обработка запроса ---------------------
 @dp.message(F.text)
 async def handle_query(message: types.Message):
+    filters = [
+        {"element_type": "text", "_search_params": {"k": Config.TEXT_K, "fetch_k": (50 + Config.TEXT_K * 10), "lambda_mult": 0.5}},
+        # {"element_type": "table", "_search_params": {"k": Config.TABLE_K, "fetch_k": (Config.TABLE_K * 10)//2, "lambda_mult": 0.4}}
+    ]
     try:
         user_id = message.from_user.id
         if user_id not in user_sessions:
@@ -421,19 +420,17 @@ async def handle_query(message: types.Message):
 
         # Получаем контекст пользователя
         session = user_sessions[user_id]
-
-        print(session["query_prefix"] + message.text)
+        # ----------------------------------
+        search_args = {"k": Config.TEXT_K, "fetch_k": (30 + Config.TEXT_K * 10)}
 
         # Выполняем поиск
-        raw_results = await layered_search(
+        raw_results = await processor.multi_async_search(
             query=session["query_prefix"] + message.text,
             indexes=session["faiss_indexes"],
-            search_function=processor.aformatted_scored_mrr_search_with_cosine_sorting
+            search_function=processor.aformatted_scored_sim_search,
+            **search_args
         )
 
-        pprint(raw_results)
-
-        # Сортировка и фильтрация найденных чанков
         sorted_results = sorted(
             raw_results,
             key=lambda x: x["score"],
@@ -559,27 +556,6 @@ async def handle_query(message: types.Message):
         await message.answer(f"⚠️ Ошибка при обработке запроса: {str(e)}")
         print(f"ERROR: {str(e)}")
         traceback.print_exc()
-
-async def layered_search(query: str, indexes: List[Optional[FAISS]], search_function: Callable):
-    all_results = []
-    global filters
-    Config.TEXT_K = 6
-
-    for filter_config in filters:
-        search_args = {
-            "filter": {k: v for k, v in filter_config.items() if not k.startswith('_')},
-            **filter_config.get("_search_params", {})
-        }
-
-    chunk_results = await processor.multi_async_search(
-        query=query,
-        indexes=indexes,
-        search_function=search_function,
-        **search_args
-    )
-    all_results.extend(chunk_results)
-
-    return all_results
 
 # Обработчик оценки пользователя
 @dp.callback_query(F.data.startswith("rate_"))
