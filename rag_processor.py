@@ -276,7 +276,7 @@ class DBConstructor(RAGProcessor):
         elements = []
         for elem in doc.element.body:
             if elem.tag.endswith('p'):
-                if elem.style.name == 'Heading 1':
+                if elem.style == '1':
                     continue
                 elements.append(('p', DocxParagraph(elem, doc)))
             elif elem.tag.endswith('tbl'):
